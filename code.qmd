@@ -1,0 +1,418 @@
+---
+title: "Titanic Data Analysis using R"
+author: "Md Ahsanul Islam"
+date: "`r Sys.Date()`"
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-title: 'Table of Content'
+    toc-depth: 1
+    toc-expand: 3
+    df_print: paged
+    number-sections: true
+    smooth-scroll: true
+    other-links: 
+      - text: Titanic Data
+        href: https://data.world/nrippner/titanic-disaster-dataset
+    # code-links:
+    #   - text: Code
+    #     icon: file-code
+    #     href: code.Rmd
+    code-summary: 'Code'
+    code-overflow: scroll
+    code-fold: show
+    code-tools: true
+    code-link: true
+    theme:
+      light: cosmo
+      dark: darkly
+    cache: false
+    df-print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Project Setup
+
+Loading required packages:
+```{r}
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer) # for color palette
+```
+
+Setting some default behaviors:
+```{r}
+theme_set(
+    # globally set ggplot2 theme to bw
+    theme_bw() +   
+    theme(
+        axis.text = element_text(size = 12),     # axis text size
+        axis.title = element_text(size = 14),    # axis title size
+        legend.title = element_text(size = 14),  # legend title
+        legend.text = element_text(size = 12),   # legend text
+        strip.text = element_text(size = 14),    # facet title
+        plot.title = element_text(size = 16, hjust = 0.5)  # plot title
+        )
+    )  
+options(ggplot2.discrete.fill = brewer.pal(12, "Paired")) # globally set color palette
+```
+
+## Data Import
+
+::: {.callout-note appearance="simple"}
+## Data description   
+- Survival : 0 = No, 1 = Yes    
+- Pclass : Ticket class (1 = 1st, 2 = 2nd, 3 = 3rd)   
+- Sex : Sex   
+- Age : Age   
+- SibSp : # of siblings / spouses onboard the Titanic   
+- Parch : # of parents / children onboard the Titanic (Some children travelled only with a nanny, therefore parch=0 for them)   
+- Ticket : Ticket number   
+- Fare : Passenger fare   
+- Cabin : Cabin number   
+- Embarked : Port of Embarkation (C = Cherbourg, Q = Queenstown, S = Southampton)   
+:::
+
+```{r}
+titanic <- read.csv("titanic.csv")
+```
+
+Inspecting first few rows: 
+```{r}
+head(titanic)
+```
+
+Inspecting the structure of the dataset:
+```{r}
+str(titanic)
+```
+
+Inspect summary of the datset:
+```{r}
+summary(titanic)
+```
+
+::: {.callout-warning}
+Age has missing values.
+:::
+
+## Data Cleaning
+
+```{r}
+df <- titanic %>%
+  mutate(Survived = factor(Survived, levels = c(0, 1), labels = c("No", "Yes")),
+         Pclass = factor(Pclass, levels = c(1, 2, 3), labels = c("1st", "2nd", "3rd")),
+         Embarked = factor(Embarked, levels = c("C", "Q", "S"), 
+                           labels = c("Cherbourg", "Queenstown", "Southampton")),
+         Sex = factor(Sex, levels = c("male", "female"), labels = c("Male", "Female")),
+         FamilySize = SibSp + Parch + 1   # including person himself/herself
+         ) %>%
+  na.omit()   # omitting rows with missing values in any column
+```
+
+::: {.callout}
+I have omitted rows with missing values in any of the columns for the sake of this analysis. But this is not recommended since the missing values themselves could have valuable information such as age information from specific class may not be collected, etc.
+:::
+
+
+# Survival Rate by Biological Gender
+
+**Problem statement:** I need to check whether there is any difference in the survival rate solely based on gender of the passengers.
+
+```{r}
+survival_rate_sex <- df %>% 
+  group_by(Sex, Survived) %>% 
+  summarise(Freq = n(), .groups = "drop") %>%
+  group_by(Sex) %>% 
+  mutate(Total = sum(Freq),
+         SurvivalRate = Freq/Total)
+survival_rate_sex
+```
+
+## Visualization
+
+::: {.panel-tabset}
+
+## Bar Chart 
+
+```{r}
+survival_rate_sex %>% 
+  ggplot(aes(x = Sex, y = SurvivalRate, fill = Survived)) +
+  geom_bar(stat = "identity", position = "fill") +     # Stack and scale to 100%
+  geom_text(aes(label = scales::percent(SurvivalRate)),  # Display percentage labels 
+  position = position_fill(vjust = 0.5)) +
+  labs(x = NULL, y = "Survival Rate", title = "Survival Rate by Sex") + 
+  scale_y_continuous(labels = scales::percent)    # Y-axis in percentages
+```
+
+## Lollipop Chart
+
+```{r}
+survival_rate_sex %>% 
+  filter(Survived == "Yes") %>%
+  ggplot(aes(x = Sex, y = SurvivalRate)) +
+  geom_point(size = 4) + 
+  geom_segment(aes(xend = Sex, yend = 0), 
+               linewidth = 1, alpha = 0.4, color = "black") +
+  geom_text(aes(label = paste0(round(SurvivalRate*100, 2),"%")), 
+            nudge_y = 0.04, size = 4, fontface = "bold") +
+  labs(x = NULL, y = "Survival Rate", title = "Survival Rate by Sex") + 
+  scale_y_continuous(labels = scales::percent) +
+  guides(fill = "none")
+```
+
+:::
+
+## Proportion Test
+
+```{r}
+prop.test(x = survival_rate_sex$Freq[survival_rate_sex$Survived == "Yes"], 
+n = survival_rate_sex$Total[survival_rate_sex$Survived == "Yes"], 
+alternative = "less")
+```
+
+::: {.callout-note}
+## Findings
+The survival rate for males is lower than females.
+:::
+
+
+## Association between Gender and Survival
+
+**Problem Statement:** Perform a chi-square test to determine if there is a significant association between gender (Sex) and survival.
+
+```{r}
+table(df$Sex, df$Survived)
+chisq.test(df$Sex, df$Survived, correct = FALSE)
+# Alternatively
+chisq.test(table(df$Sex, df$Survived), correct = FALSE)
+```
+
+::: {.callout-note}
+## Findings
+SInce the p-value is less than 0.05, it can concluded that there is a significant association between gender and survival.
+:::
+
+
+
+# Survival Rate by Passenger Class
+
+**Problem Statement:** Investigate the relationship between passenger class (Pclass) and survival.
+
+
+```{r}
+survival_rate_pclass <- df %>% 
+  group_by(Pclass, Survived) %>% 
+  summarise(Freq = n(), .groups = "drop") %>% 
+  group_by(Pclass) %>% 
+  mutate(Total = sum(Freq),
+         SurvivalRate = Freq/Total) 
+survival_rate_pclass
+```
+
+## Visualization
+
+```{r}
+survival_rate_pclass %>% 
+  ggplot(aes(x = Pclass, y = Freq, fill = Survived)) +
+  geom_bar(stat = "identity", position = "fill") +  
+  geom_text(aes(label = scales::percent(SurvivalRate)), 
+            position = position_fill(vjust = 0.5)) + 
+  scale_y_continuous(labels = scales::percent) +  
+  labs(x = "Passenger Class", y = "Percentage", fill = "Survived", 
+       title = "Survival Rate by Passenger Class") + 
+  coord_flip()
+```
+
+## Pairwise Proportion Test with Bonferroni Correction
+
+```{r}
+pairwise.prop.test(x = survival_rate_pclass$Freq[survival_rate_pclass$Survived == "Yes"], 
+                   n = survival_rate_pclass$Total[survival_rate_pclass$Survived == "Yes"], 
+                   p.adjust.method = "bonferroni")
+```
+
+::: {.callout}
+## Findings  
+- The first row of first column represents the comparison between Pclass 1 and Pclass 2. The p-value is 0.0044, indicating that the difference in survival rates between these two classes is statistically significant.
+
+- The second row of first column represents the comparison between Pclass 2 and Pclass 3. The p-value is 1.4e-07, indicating that the difference in survival rates between these two classes is also highly statistically significant.
+
+- The second row of second column represents the comparison between Pclass 1 and Pclass 3. The p-value is extremely small (< 2e-16), indicating that the difference in survival rates between these two classes is highly statistically significant.
+:::
+
+
+
+# Survival Rate by Age
+
+**Problem statement:** Analyze the age distribution of passengers to see average age of survivors and deaths.
+
+
+```{r}
+df %>%
+  group_by(Survived) %>%
+  summarise(`Average Age` = mean(Age, na.rm = TRUE))
+```
+
+::: {.callout-note}
+Average age of survived passengers is 28.2 years and average age of passengers who did not survive is 30.6 years.0
+:::
+
+
+## Visualization
+
+:::  {.panel-tabset}
+
+## Boxplot
+
+```{r}
+df %>% 
+  ggplot(aes(x = Survived, y = Age)) + 
+  geom_boxplot() + 
+  labs(x = "Survived", y = "Age", title = "Boxplot of Age by Survival")
+```
+
+## Density Plot
+
+```{r}
+df %>% 
+  ggplot(aes(fill = Survived, x = Age)) + 
+  geom_density(alpha = 0.5) + 
+  labs(x = "Age", y = "Density", fill = "Survived",
+title = "Age Distribution by Survival")
+```
+
+:::
+
+
+## Two-sample t-test
+
+```{r}
+t.test(Age ~ Survived, data = df)
+```
+
+
+::: {.callout-note}
+## Findings  
+The average age of survived passengers is higher than that of passengers who did not survive. The p-value is 0.02931, indicating that the difference in means is statistically significant.
+:::
+
+
+# Survival Rate by Family Size
+
+**Problem Statement:** Visually analyze how family size affects the likelihood of survival.
+
+```{r}
+survival_rate_family_size <- df %>% 
+  group_by(FamilySize) %>% 
+  summarise(Survived = sum(Survived=="Yes"),
+            Total = n()) %>%
+  mutate(SurvivalRate = Survived/Total)
+survival_rate_family_size
+```
+
+## Visualization
+
+```{r}
+survival_rate_family_size %>% 
+  ggplot(aes(x = as.factor(FamilySize), y = SurvivalRate, fill = SurvivalRate)) + 
+  geom_col() + 
+  labs(x = "Family Size", y = "Survival Rate", fill = "Survived",
+title = "Family Size Distribution by Survival") +
+  scale_fill_gradient(low = "red2", high = "darkgreen") +
+  scale_y_continuous(labels = scales::percent)
+```
+
+
+## Logistic Regression
+
+```{r}
+fit <- glm(Survived ~ as.factor(FamilySize), data = df, family = binomial(link = "logit"))
+broom::tidy(fit, exponentiate = TRUE) 
+```
+
+::: {.callout-note}
+## Findings  
+Family sizes of 2, 3, and 4 were associated with a positive and significant effect on survival (p < 0.001), with log-odds of 2.58, 2.84, and 7.49, respectively. But, family sizes of 5, 6, 7, and 8 showed no statistically significant effect (p > 0.05). This suggests that smaller family sizes (2–4) are associated with higher chance to survive compared to single person family size, while larger family sizes do not have a meaningful impact compared to single person family size.
+:::
+
+
+# Visually Inspecting Age Distribution by Pclass and Gender
+
+```{r}
+#| code-fold: true
+df %>% 
+  ggplot(aes(x = Age, fill = Sex)) + 
+  geom_histogram(alpha = 0.45, bins = 30) + 
+  facet_grid(Pclass~., labeller = label_both, scales = "free_y") +
+  scale_fill_manual(values = c("blue", "red")) +
+  labs(x = "Age", y = "Freq.", fill = "Gender", 
+       title = "Age Distribution by Class and Gender")
+```
+
+
+
+# Survival Rate by Age Group
+
+**Problem Statement:** I've already investigated if there is any relationship between age and survival rate. But this time I have grouped the passengers by age and see the difference in survival rate.
+
+```{r}
+survival_rate_age_group <- df %>%
+  mutate(AgeGroup = ifelse(Age < 18, "Children", ifelse(Age < 65, "Adults", "Elderly"))) %>%
+  group_by(AgeGroup) %>%
+  summarise(Survived = sum(Survived=="Yes"),
+            Total = n(),
+            SurvivalRate = Survived/Total) 
+survival_rate_age_group
+```
+
+## Visualization
+
+:::  {.panel-tabset}
+
+## Manually Ordered Barplot
+
+```{r}
+survival_rate_age_group %>%
+  ggplot(aes(x = AgeGroup, y = SurvivalRate, fill = SurvivalRate)) + 
+  geom_col() +
+  geom_text(aes(label = paste0(scales::percent(SurvivalRate), " (", Survived,"/",Total,")")), 
+            nudge_y = 0.03, size = 5) +
+  labs(x = "Age Group", y = "Survival Rate", fill = "Age Group",
+       title = "Survival Rate by Age Group") +
+  scale_fill_gradient(low = "#d7504b", high = "#548220") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+  scale_x_discrete(limits = c("Children", "Adults", "Elderly")) +    # manually reposition the bars
+  guides(fill = "none")
+```
+
+## Automatically Arranged Barplot
+
+```{r}
+survival_rate_age_group %>%
+  ggplot(aes(x = reorder(AgeGroup, -SurvivalRate),    # arrange the bars from highest to lowest
+             y = SurvivalRate, fill = SurvivalRate)) + 
+  geom_col() +
+  geom_text(aes(label = paste0(scales::percent(SurvivalRate), " (", Survived,"/",Total,")")), 
+            nudge_y = 0.03, size = 5) +
+  labs(x = "Age Group", y = "Survival Rate", fill = "Age Group",
+       title = "Survival Rate by Age Group") +
+  scale_fill_gradient(low = "#d7504b", high = "#548220") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+  guides(fill = "none")
+```
+
+:::
+
+::: {.callout-note}
+## Findings
+The survival rate of children is higher than that of adults and elderlies.
+:::
+
+
+
+
