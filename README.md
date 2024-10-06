@@ -1,0 +1,1 @@
+In this project, I have explored individual variables' effect on survival rate. This, of course, is not something that extracts the maximum information from the dataset but shows how different R functions can be used to extract valuable information. I have extensively used dplyr and ggplot2 which was the main goal of this project.
